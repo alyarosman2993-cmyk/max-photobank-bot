@@ -10,7 +10,6 @@ app = Flask(__name__)
 
 MAX_TOKEN = os.environ.get("MAX_TOKEN")
 MAX_API = "https://platform-api.max.ru"
-
 YANDEX_EXCEL_PATH = os.environ.get("YANDEX_EXCEL_PATH")
 
 USER_STATES = {}
@@ -55,24 +54,20 @@ def home():
 
 
 def make_keyboard(items):
-    buttons = []
-    for item in items:
-        buttons.append([{"type": "message", "text": item}])
-
     return [{
         "type": "inline_keyboard",
-        "payload": {"buttons": buttons}
+        "payload": {
+            "buttons": [[{"type": "message", "text": item}] for item in items]
+        }
     }]
 
 
 def send_message(chat_id, text, buttons=None):
     url = f"{MAX_API}/messages?chat_id={chat_id}"
-
     headers = {
         "Authorization": MAX_TOKEN,
         "Content-Type": "application/json"
     }
-
     payload = {"text": text}
 
     if buttons:
@@ -108,10 +103,7 @@ def upload_excel_to_yandex(file_bytes):
     response = requests.get(
         "https://cloud-api.yandex.net/v1/disk/resources/upload",
         headers=yandex_headers(),
-        params={
-            "path": YANDEX_EXCEL_PATH,
-            "overwrite": "true"
-        }
+        params={"path": YANDEX_EXCEL_PATH, "overwrite": "true"}
     )
     response.raise_for_status()
 
@@ -120,8 +112,14 @@ def upload_excel_to_yandex(file_bytes):
     upload_response.raise_for_status()
 
 
-def append_row_to_sheet(ws, row):
-    ws.append(row)
+def add_row_to_first_empty(ws, row):
+    target_row = 2
+
+    while ws.cell(row=target_row, column=1).value:
+        target_row += 1
+
+    for col, value in enumerate(row, start=1):
+        ws.cell(row=target_row, column=col, value=value)
 
 
 def save_application_to_excel(state):
@@ -139,17 +137,16 @@ def save_application_to_excel(state):
     ]
 
     main_sheet = workbook["Все заявки"]
-    append_row_to_sheet(main_sheet, row)
+    add_row_to_first_empty(main_sheet, row)
 
     profile_sheet_name = SHEET_BY_TYPE.get(state.get("participant_type"))
     if profile_sheet_name and profile_sheet_name in workbook.sheetnames:
         profile_sheet = workbook[profile_sheet_name]
-        append_row_to_sheet(profile_sheet, row)
+        add_row_to_first_empty(profile_sheet, row)
 
     output = BytesIO()
     workbook.save(output)
     output.seek(0)
-
     upload_excel_to_yandex(output)
 
 
@@ -180,12 +177,11 @@ def start_screen(chat_id):
 
 def start_flow(chat_id, user_id):
     USER_STATES[user_id] = {"step": "participant_type"}
-
     send_message(
         chat_id,
         "Для направления материалов Вам потребуется последовательно указать:\n"
         "• тип участника;\n"
-        "• наименование участника;\n"
+        "• наименование участника — кроме случая «Субъект РФ»;\n"
         "• регион проведения;\n"
         "• Всероссийскую акцию;\n"
         "• формат мероприятия;\n"
@@ -204,7 +200,6 @@ def get_message_parts(data):
     text = body.get("text", "")
 
     text = text.strip() if text else ""
-
     return chat_id, user_id, text
 
 
@@ -266,10 +261,16 @@ def webhook():
                 return jsonify({"status": "ok"})
 
             state["participant_type"] = text
+
+            if text == "Субъект РФ":
+                state["participant_name"] = ""
+                state["step"] = "region"
+                send_message(chat_id, "Введите регион проведения:")
+                return jsonify({"status": "ok"})
+
             state["step"] = "participant_name"
 
             name_prompts = {
-                "Субъект РФ": "Укажите наименование органа исполнительной власти субъекта Российской Федерации, направляющего материалы.",
                 "ФОИВ": "Укажите полное наименование федерального органа исполнительной власти.",
                 "ВУЗ": "Укажите полное наименование образовательной организации высшего образования.",
                 "СУЗ": "Укажите полное наименование среднего профессионального образовательного учреждения.",
@@ -327,10 +328,7 @@ def webhook():
 
         if state["step"] == "disk_link":
             if not has_link(text):
-                send_message(
-                    chat_id,
-                    "Пожалуйста, пришлите ссылку на Яндекс.Диск с фото- и видеоматериалами."
-                )
+                send_message(chat_id, "Пожалуйста, пришлите ссылку на Яндекс.Диск с фото- и видеоматериалами.")
                 return jsonify({"status": "ok"})
 
             state["disk_link"] = text
@@ -350,7 +348,7 @@ def webhook():
                 chat_id,
                 "Заявка успешно зарегистрирована ✅\n\n"
                 f"Тип участника: {state.get('participant_type')}\n"
-                f"Наименование участника: {state.get('participant_name')}\n"
+                f"Наименование участника: {state.get('participant_name') or '—'}\n"
                 f"Регион: {state.get('region')}\n"
                 f"Всероссийская акция: {state.get('action')}\n"
                 f"Формат мероприятия: {state.get('format')}\n"
