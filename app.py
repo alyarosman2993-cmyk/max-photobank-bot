@@ -111,6 +111,25 @@ def get_message_parts(data):
 
 def has_link(text):
     return bool(re.search(r"https?://\S+", text or ""))
+    def yandex_headers():
+    return {
+        "Authorization": f"OAuth {os.environ.get('YANDEX_TOKEN')}"
+    }
+
+@app.route("/check-yandex")
+def check_yandex():
+    yandex_path = os.environ.get("YANDEX_EXCEL_PATH")
+
+    response = requests.get(
+        "https://cloud-api.yandex.net/v1/disk/resources",
+        headers=yandex_headers(),
+        params={"path": yandex_path}
+    )
+
+    return jsonify({
+        "status_code": response.status_code,
+        "response": response.text
+    })
 
 
 @app.route("/webhook", methods=["POST"])
