@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 from flask import Flask, request, jsonify
 app = Flask(__name__)
@@ -51,11 +52,27 @@ def send_message(chat_id, text, buttons=None):
 (url, json=payload, headers=headers)
     print("SEND RESPONSE:", response.status_code, response.text, flush=True)
     return response
+def start_screen(chat_id):
+    send_message(
+        chat_id,
+        "Здравствуйте!\n\n"
+        "Данный бот создан для сбора фото- и видеоматериалов по реализации "
+        "Всероссийских акций, приуроченных к государственным праздникам Российской Федерации.\n\n"
+        "Для направления материалов нажмите кнопку ниже.",
+        ["Начать работу"]
+    )
 def start_flow(chat_id, user_id):
     USER_STATES[user_id] = {"step": "participant_type"}
     send_message(
         chat_id,
-        "Добро пожаловать в фотобанк.\n\nВыберите тип участника:",
+        "Для направления материалов Вам потребуется последовательно указать:\n"
+        "• тип участника;\n"
+        "• наименование участника;\n"
+        "• регион проведения;\n"
+        "• Всероссийскую акцию;\n"
+        "• формат мероприятия;\n"
+        "• ссылку на Яндекс.Диск с фото- и видеоматериалами.\n\n"
+        "Выберите тип участника:",
         PARTICIPANT_TYPES
     )
 def get_message_parts(data):
@@ -64,68 +81,82 @@ def get_message_parts(data):
     chat_id = message.get("recipient", {}).get("chat_id")
     user_id = message.get("sender", {}).get("user_id")
     text = body.get("text", "")
-    attachments = body.get("attachments", [])
     text = text.strip() if text else ""
-    return message, body, chat_id, user_id, text, attachments
-def has_media(attachments):
-    if not attachments:
-        return False
-    for item in attachments:
-        item_type = item.get("type", "")
-        payload = item.get("payload", {})
-        if item_type in ["image", "photo", "video", "media", "file"]:
-            return True
-        if payload.get("url") or payload.get("file_id") or payload.get("token"):
-            return True
-    return False
+    return chat_id, user_id, text
+def has_link(text):
+    return bool(re.search
+(r"https?://\S+", text or ""))
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
     print("MAX EVENT:", data, flush=True)
     try:
-        message, body, chat_id, user_id, text, attachments = get_message_parts(data)
+        chat_id, user_id, text = get_message_parts(data)
         if not chat_id or not user_id:
             return jsonify({"status": "ok"})
         state = USER_STATES.get(user_id)
         if text in ["/start", "старт", "Старт", "начать", "Начать"]:
+            start_screen(chat_id)
+            return jsonify({"status": "ok"})
+        if text == "Начать работу":
             start_flow(chat_id, user_id)
             return jsonify({"status": "ok"})
-        if text == "Да, добавить ещё формат":
+        if text == "Добавить ещё один формат":
             old_state = USER_STATES.get(user_id, {})
             USER_STATES[user_id] = {
                 "step": "format",
                 "participant_type": old_state.get("participant_type"),
+                "participant_name": old_state.get("participant_name"),
                 "region": old_state.get("region"),
                 "action": old_state.get("action")
             }
             send_message(chat_id, "Введите следующий формат мероприятия:")
             return jsonify({"status": "ok"})
-        if text == "Завершить":
+        if text == "Завершить работу":
             USER_STATES.pop(user_id, None)
-            send_message(chat_id, "Готово. Загрузка материалов завершена ✅")
+            send_message(
+                chat_id,
+                "Благодарим за направление материалов!\n\n" 
+                "Для повторной загрузки материалов Вы можете вернуться в бот "
+                "в любое время и нажать кнопку «Начать работу».",
+                ["Начать работу"]
+            )
             return jsonify({"status": "ok"})
         if not state:
-            start_flow(chat_id, user_id)
+            start_screen(chat_id)
             return jsonify({"status": "ok"})
         if state["step"] == "participant_type":
             if text not in PARTICIPANT_TYPES:
                 send_message(chat_id, "Пожалуйста, выберите тип участника кнопкой.", PARTICIPANT_TYPES)
                 return jsonify({"status": "ok"})
             state["participant_type"] = text
+            state["step"] = "participant_name"
+            send_message(
+                chat_id,
+                "Укажите полное наименование участника.\n\n"
+                "Например: название школы, вуза, СУЗа, организации, НКО, "
+                "органа власти или субъекта Российской Федерации."
+            )
+            return jsonify({"status": "ok"})
+        if state["step"] == "participant_name":
+            if not text:
+                send_message(chat_id, "Укажите полное наименование участника текстом.")
+                return jsonify({"status": "ok"})
+            state["participant_name"] = text
             state["step"] = "region"
-            send_message(chat_id, "Введите регион:")
+            send_message(chat_id, "Введите регион проведения:")
             return jsonify({"status": "ok"})
         if state["step"] == "region":
             if not text:
-                send_message(chat_id, "Введите регион текстом.")
+                send_message(chat_id, "Введите регион проведения текстом.")
                 return jsonify({"status": "ok"})
             state["region"] = text
             state["step"] = "action"
-            send_message(chat_id, "Выберите акцию:", ACTIONS)
+            send_message(chat_id, "Выберите Всероссийскую акцию:", ACTIONS)
             return jsonify({"status": "ok"})
         if state["step"] == "action":
             if text not in ACTIONS:
-                send_message(chat_id, "Пожалуйста, выберите акцию кнопкой.", ACTIONS)
+                send_message(chat_id, "Пожалуйста, выберите Всероссийскую акцию кнопкой.", ACTIONS)
                 return jsonify({"status": "ok"})
             state["action"] = text
             state["step"] = "format"
@@ -136,24 +167,34 @@ def webhook():
                 send_message(chat_id, "Введите формат мероприятия текстом.")
                 return jsonify({"status": "ok"})
             state["format"] = text
-            state["step"] = "media"
-            send_message(chat_id, "Теперь пришлите фото или видео.")
-            return jsonify({"status": "ok"})
-        if state["step"] == "media":
-            print("MEDIA STEP BODY:", body, flush=True)
-            if not has_media(attachments):
-                send_message(chat_id, "Пришлите фото или видео файлом/медиа.")
-                return jsonify({"status": "ok"})
+            state["step"] = "disk_link"
             send_message(
                 chat_id,
-                "Материалы получил ✅\n\n"
-                "Заявка сохранена в тестовом режиме.\n\n"
+                "Пришлите ссылку на Яндекс.Диск с фото- и видеоматериалами "
+                "по данному формату."
+            )
+            return jsonify({"status": "ok"})
+        if state["step"] == "disk_link":
+            if not has_link(text):
+                send_message(
+                    chat_id,
+                    "Пожалуйста, пришлите ссылку на Яндекс.Диск с фото- и видеоматериалами."
+                )
+                return jsonify({"status": "ok"})
+            state["disk_link"] = text
+            send_message(
+                chat_id,
+                "Заявка успешно зарегистрирована ✅\n\n"
                 f"Тип участника: {state.get('participant_type')}\n"
+                f"Наименование участника: {state.get('participant_name')}\n"
                 f"Регион: {state.get('region')}\n"
-                f"Акция: {state.get('action')}\n"
-                f"Формат: {state.get('format')}\n\n"
-                "Хотите добавить ещё один формат?",
-                ["Да, добавить ещё формат", "Завершить"]
+                f"Всероссийская акция: {state.get('action')}\n"
+                f"Формат мероприятия: {state.get('format')}\n"
+                f"Ссылка на материалы: {state.get('disk_link')}\n\n"
+                "Если у Вас есть материалы по другому формату в рамках этой же акции, "
+                "Вы можете добавить ещё одну заявку.\n\n"
+                "Выберите дальнейшее действие:",
+                ["Добавить ещё один формат", "Завершить работу"]
             )
             return jsonify({"status": "ok"})
     except Exception as e:
