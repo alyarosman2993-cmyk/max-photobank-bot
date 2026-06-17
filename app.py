@@ -3,6 +3,8 @@ import re
 import requests
 from io import BytesIO
 from datetime import datetime
+from zipfile import ZipFile, ZIP_DEFLATED
+import xml.etree.ElementTree as ET
 from openpyxl import load_workbook
 from flask import Flask, request, jsonify
 
@@ -84,6 +86,47 @@ def yandex_headers():
     }
 
 
+def clean_broken_excel_tables(xlsx_bytes):
+    input_file = BytesIO(xlsx_bytes)
+    output_file = BytesIO()
+
+    with ZipFile(input_file, "r") as zin:
+        with ZipFile(output_file, "w", ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                name = item.filename
+
+                if name.startswith("xl/tables/"):
+                    continue
+
+                data = zin.read(name)
+
+                if name == "[Content_Types].xml":
+                    root = ET.fromstring(data)
+                    for child in list(root):
+                        if child.attrib.get("PartName", "").startswith("/xl/tables/"):
+                            root.remove(child)
+                    data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+                if name.startswith("xl/worksheets/_rels/") and name.endswith(".rels"):
+                    root = ET.fromstring(data)
+                    for child in list(root):
+                        if child.attrib.get("Type", "").endswith("/table"):
+                            root.remove(child)
+                    data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+                if name.startswith("xl/worksheets/sheet") and name.endswith(".xml"):
+                    root = ET.fromstring(data)
+                    ns = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+                    for table_parts in root.findall("main:tableParts", ns):
+                        root.remove(table_parts)
+                    data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+                zout.writestr(item, data)
+
+    output_file.seek(0)
+    return output_file
+
+
 def download_excel_from_yandex():
     response = requests.get(
         "https://cloud-api.yandex.net/v1/disk/resources/download",
@@ -96,7 +139,7 @@ def download_excel_from_yandex():
     file_response = requests.get(download_url)
     file_response.raise_for_status()
 
-    return BytesIO(file_response.content)
+    return clean_broken_excel_tables(file_response.content)
 
 
 def upload_excel_to_yandex(file_bytes):
