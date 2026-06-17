@@ -1,12 +1,17 @@
 import os
 import re
 import requests
+from io import BytesIO
+from datetime import datetime
+from openpyxl import load_workbook
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
 MAX_TOKEN = os.environ.get("MAX_TOKEN")
 MAX_API = "https://platform-api.max.ru"
+
+YANDEX_EXCEL_PATH = os.environ.get("YANDEX_EXCEL_PATH")
 
 USER_STATES = {}
 
@@ -32,6 +37,16 @@ ACTIONS = [
     "День Героев Отечества",
     "Новый год",
 ]
+
+SHEET_BY_TYPE = {
+    "Субъект РФ": "Субъекты РФ",
+    "ФОИВ": "ФОИВ",
+    "ВУЗ": "ВУЗы",
+    "СУЗ": "СУЗы",
+    "Школа": "Школы",
+    "Организации и НКО": "Организации и НКО",
+    "Политические НКО": "Политические НКО",
+}
 
 
 @app.route("/")
@@ -66,6 +81,90 @@ def send_message(chat_id, text, buttons=None):
     response = requests.post(url, json=payload, headers=headers)
     print("SEND RESPONSE:", response.status_code, response.text, flush=True)
     return response
+
+
+def yandex_headers():
+    return {
+        "Authorization": f"OAuth {os.environ.get('YANDEX_TOKEN')}"
+    }
+
+
+def download_excel_from_yandex():
+    response = requests.get(
+        "https://cloud-api.yandex.net/v1/disk/resources/download",
+        headers=yandex_headers(),
+        params={"path": YANDEX_EXCEL_PATH}
+    )
+    response.raise_for_status()
+
+    download_url = response.json()["href"]
+    file_response = requests.get(download_url)
+    file_response.raise_for_status()
+
+    return BytesIO(file_response.content)
+
+
+def upload_excel_to_yandex(file_bytes):
+    response = requests.get(
+        "https://cloud-api.yandex.net/v1/disk/resources/upload",
+        headers=yandex_headers(),
+        params={
+            "path": YANDEX_EXCEL_PATH,
+            "overwrite": "true"
+        }
+    )
+    response.raise_for_status()
+
+    upload_url = response.json()["href"]
+    upload_response = requests.put(upload_url, data=file_bytes.getvalue())
+    upload_response.raise_for_status()
+
+
+def append_row_to_sheet(ws, row):
+    ws.append(row)
+
+
+def save_application_to_excel(state):
+    file_stream = download_excel_from_yandex()
+    workbook = load_workbook(file_stream)
+
+    row = [
+        datetime.now().strftime("%d.%m.%Y %H:%M"),
+        state.get("participant_type", ""),
+        state.get("participant_name", ""),
+        state.get("region", ""),
+        state.get("action", ""),
+        state.get("format", ""),
+        state.get("disk_link", ""),
+    ]
+
+    main_sheet = workbook["Все заявки"]
+    append_row_to_sheet(main_sheet, row)
+
+    profile_sheet_name = SHEET_BY_TYPE.get(state.get("participant_type"))
+    if profile_sheet_name and profile_sheet_name in workbook.sheetnames:
+        profile_sheet = workbook[profile_sheet_name]
+        append_row_to_sheet(profile_sheet, row)
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+
+    upload_excel_to_yandex(output)
+
+
+@app.route("/check-yandex")
+def check_yandex():
+    response = requests.get(
+        "https://cloud-api.yandex.net/v1/disk/resources",
+        headers=yandex_headers(),
+        params={"path": YANDEX_EXCEL_PATH}
+    )
+
+    return jsonify({
+        "status_code": response.status_code,
+        "response": response.text
+    })
 
 
 def start_screen(chat_id):
@@ -111,28 +210,6 @@ def get_message_parts(data):
 
 def has_link(text):
     return bool(re.search(r"https?://\S+", text or ""))
-
-
-def yandex_headers():
-    return {
-        "Authorization": f"OAuth {os.environ.get('YANDEX_TOKEN')}"
-    }
-
-
-@app.route("/check-yandex")
-def check_yandex():
-    yandex_path = os.environ.get("YANDEX_EXCEL_PATH")
-
-    response = requests.get(
-        "https://cloud-api.yandex.net/v1/disk/resources",
-        headers=yandex_headers(),
-        params={"path": yandex_path}
-    )
-
-    return jsonify({
-        "status_code": response.status_code,
-        "response": response.text
-    })
 
 
 @app.route("/webhook", methods=["POST"])
@@ -257,6 +334,17 @@ def webhook():
                 return jsonify({"status": "ok"})
 
             state["disk_link"] = text
+
+            try:
+                save_application_to_excel(state)
+            except Exception as excel_error:
+                print("EXCEL ERROR:", excel_error, flush=True)
+                send_message(
+                    chat_id,
+                    "Заявка получена, но не удалось записать её в таблицу. "
+                    "Пожалуйста, сообщите организаторам."
+                )
+                return jsonify({"status": "ok"})
 
             send_message(
                 chat_id,
