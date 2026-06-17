@@ -138,10 +138,7 @@ def webhook():
                 chat_id,
                 "Пока тест: я получил шаг с фото.\n\nДанные заявки:\n"
                 f"Тип участника: {state.get('participant_type')}\n"
-                f"Регион: {state
-
-
-et('region')}\n"
+                f"Регион: {stateet('region')}\n"
                 f"Акция: {state.get('action')}\n"
                 f"Формат: {state.get('format')}\n\n"
                 "Следующим шагом подключим загрузку фото на Яндекс.Диск."
@@ -155,4 +152,4 @@ et('region')}\n"
     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":
-    app.run().g
+    app.run()
