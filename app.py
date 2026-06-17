@@ -12,15 +12,14 @@ def home():
     return "MAX Photobank Bot работает"
 
 def send_message(chat_id, text):
-    url = f"{MAX_API}/messages"
+    url = f"{MAX_API}/messages?chat_id={chat_id}"
+
     headers = {
         "Authorization": MAX_TOKEN,
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
     }
+
     payload = {
-        "recipient": {
-            "chat_id": chat_id
-        },
         "text": text
     }
 
