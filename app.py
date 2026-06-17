@@ -111,10 +111,13 @@ def get_message_parts(data):
 
 def has_link(text):
     return bool(re.search(r"https?://\S+", text or ""))
-    def yandex_headers():
-     return {
-                "Authorization": f"OAuth {os.environ.get('YANDEX_TOKEN')}"
-        }
+
+
+def yandex_headers():
+    return {
+        "Authorization": f"OAuth {os.environ.get('YANDEX_TOKEN')}"
+    }
+
 
 @app.route("/check-yandex")
 def check_yandex():
