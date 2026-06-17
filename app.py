@@ -4,8 +4,7 @@ import requests
 from flask import Flask, request, jsonify
 app = Flask(__name__)
 MAX_TOKEN = os.environ.get("MAX_TOKEN")
-MAX_API = "https://platform-api.max.ru
-"
+MAX_API = "https://platform-api.max.ru"
 USER_STATES = {}
 PARTICIPANT_TYPES = [
     "Субъект РФ",
