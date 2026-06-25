@@ -11,7 +11,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 MAX_TOKEN = os.environ.get("MAX_TOKEN")
-MAX_API = "https://platform-api.max.ru"
+MAX_API = "https://platform-api2.max.ru"
 YANDEX_EXCEL_PATH = os.environ.get("YANDEX_EXCEL_PATH")
 
 USER_STATES = {}
