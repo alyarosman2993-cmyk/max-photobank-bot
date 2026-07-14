@@ -1,6 +1,10 @@
 import os
 import re
 import requests
+import certifi
+import ssl
+
+ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
 from io import BytesIO
 from datetime import datetime
 from zipfile import ZipFile, ZIP_DEFLATED
