@@ -85,6 +85,8 @@ def send_message(chat_id, text, buttons=None):
 
 
 def yandex_headers():
+    def get_verify():
+    return certifi.where()
     return {
         "Authorization": f"OAuth {os.environ.get('YANDEX_TOKEN')}"
     }
