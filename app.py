@@ -16,6 +16,10 @@ app = Flask(__name__)
 
 MAX_TOKEN = os.environ.get("MAX_TOKEN")
 MAX_API = "https://platform-api2.max.ru"
+CERT_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "Kornevoy_sertifikat_GUTS_2022.CER"
+)
 YANDEX_EXCEL_PATH = os.environ.get("YANDEX_EXCEL_PATH")
 
 USER_STATES = {}
