@@ -1,10 +1,6 @@
 import os
 import re
 import requests
-import certifi
-import ssl
-
-ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
 from io import BytesIO
 from datetime import datetime
 from zipfile import ZipFile, ZIP_DEFLATED
@@ -15,11 +11,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 MAX_TOKEN = os.environ.get("MAX_TOKEN")
-MAX_API = "https://platform-api2.max.ru"
-CERT_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "Kornevoy_sertifikat_GUTS_2022.CER"
-)
+MAX_API = os.environ.get("MAX_API", "https://platform-api.max.ru")
 YANDEX_EXCEL_PATH = os.environ.get("YANDEX_EXCEL_PATH")
 
 USER_STATES = {}
@@ -83,14 +75,12 @@ def send_message(chat_id, text, buttons=None):
     if buttons:
         payload["attachments"] = make_keyboard(buttons)
 
-    response = requests.post(url, json=payload, headers=headers)
+    response = requests.post(url, json=payload, headers=headers, timeout=15)
     print("SEND RESPONSE:", response.status_code, response.text, flush=True)
     return response
 
 
 def yandex_headers():
-    def get_verify():
-    return certifi.where()
     return {
         "Authorization": f"OAuth {os.environ.get('YANDEX_TOKEN')}"
     }
@@ -203,6 +193,20 @@ def save_application_to_excel(state):
     upload_excel_to_yandex(output)
 
 
+@app.route("/check-max")
+def check_max():
+    response = requests.get(
+        f"{MAX_API}/me",
+        headers={"Authorization": MAX_TOKEN or ""},
+        timeout=15
+    )
+
+    return jsonify({
+        "status_code": response.status_code,
+        "response": response.text
+    })
+
+
 @app.route("/check-yandex")
 def check_yandex():
     response = requests.get(
@@ -262,10 +266,18 @@ def has_link(text):
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     print("MAX EVENT:", data, flush=True)
 
     try:
+        if data.get("update_type") == "bot_started":
+            chat_id = data.get("chat_id")
+            user_id = data.get("user", {}).get("user_id")
+            if chat_id:
+                USER_STATES.pop(user_id, None)
+                start_screen(chat_id)
+            return jsonify({"status": "ok"})
+
         chat_id, user_id, text = get_message_parts(data)
 
         if not chat_id or not user_id:
